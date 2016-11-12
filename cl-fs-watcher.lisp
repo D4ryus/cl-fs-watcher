@@ -312,12 +312,12 @@ For more Details see the actual error message.
     (unless fullpath
       (error "TODO: ERROR: The given Directory does not exist (or is
               fishy). calling DIRECTORY on it returned NIL."))
-    (setf (slot-value w 'dir) (format nil "~a" fullpath)))
-  ;; add hook to call CALLBACK with watcher and args. CALLBACK will
-  ;; then figure out which type of event happend etc.
-  (setf (slot-value w 'thread)
-        (bt:make-thread (lambda () (watcher-event-loop w))
-                        :name "directory-watcher")))
+    (setf (slot-value w 'dir) (format nil "~a" fullpath))
+    ;; add hook to call CALLBACK with watcher and args. CALLBACK will
+    ;; then figure out which type of event happend etc.
+    (setf (slot-value w 'thread)
+          (bt:make-thread (lambda () (watcher-event-loop w))
+                          :name (format nil "directory-watcher ~a" fullpath)))))
 
 (defun set-hook (watcher hook-fn)
   "WATCHER is the watcher object the HOOK-FN should be set to.
