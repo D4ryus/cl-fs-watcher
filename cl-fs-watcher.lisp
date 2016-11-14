@@ -6,9 +6,8 @@ This file contains the directory watcher which is used to watch a
 directory for changes to its files and directories.
 
 To use the Watcher create a instance of WATCHER with a directory to
-watch and attach a hook, either by specifying it at creation or by
-calling SET-HOOK. Once a Watcher is created a Thread is started which
-is handling the event-loop (see cl-async documentation for more
+watch and attach a hook. Once a Watcher is created a Thread is started
+which is handling the event-loop (see cl-async documentation for more
 information about the event-loop)
 
 For example:
@@ -44,24 +43,13 @@ following:
                 deleted. If the Hook returns the Event Loop will
                 finish and the Watcher THREAD will terminate)
 
-To Switch the Hook use SET-HOOK:
-
-(set-hook *my-watcher* #'call-me-instead)
-
 To disable/remove the hook use:
 
-(set-hook *my-watcher* nil)
+(setf (hook *my-watcher*) nil)
 
 and to stop the Watcher and cleanup all its resources use:
 
 (stop-watcher *my-watcher*)
-
-NOTE: The Watcher uses STMX for atomic operations, so it might throw
-an error if some functios (like STOP-WATCHER) are getting called from
-the REPL Thread. To fix this call those functions from a
-Bordeaux-Thread using:
-(bt:make-thread (lambda () (stop-watcher *my-watcher*)))
-For more Details see the actual error message.
 
 |#
 
@@ -69,64 +57,78 @@ For more Details see the actual error message.
 
 ;;; "cl-fs-watcher" goes here. Hacks and glory await!
 
-(stmx:transactional
- (defclass watcher ()
-   ((dir :reader dir
-         :initarg :dir
-         :initform (error "specify a directory!")
-         :type string
-         :transactional nil
-         :documentation "Main or Root Directory which will be watched,
-                         if RECURSIVE-P is t all its subdirectories
-                         will be watched too.")
-    (thread :reader thread
-            :type bt:thread
-            :transactional nil
-            :documentation "BT:THREAD which will run the event-loop,
-                            on Creation of WATCHER the THREAD will be
-                            created. Thread will finish if DIR gets deleted or
-                            STOP-WATCHER is called.")
-    (hook :reader hook
-          :initarg :hook
-          :initform nil
-          :type function
-          :documentation "The function which gets called if a event
-                          occurs. HOOk needs to be a FUNCTION which
-                          takes 3 arguments. It will be called with
-                          the Watcher Object, the filename and the
-                          Event-type. To add/change the hook use
-                          SET-HOOK since its a STMX:TRANSACTIONAL
-                          variable and needs to be set inside a
-                          STMX:ATOMIC block.")
-    (directory-handles :reader directory-handles
-                       :initform (make-hash-table :test 'equal)
-                       :type hash-table
-                       :documentation "Hash-table of all watched
-                                       directories, if RECURSIVE-P is
-                                       NIL this Hash-table will only
-                                       contain the DIR handle. If
-                                       RECURSIVE-P is T it will
-                                       contain all watched
-                                       subdirectories, and it will be
-                                       automatically be updated in
-                                       case a directory is added or
-                                       removed. Do not set member by
-                                       Hand, these will be updated by
-                                       ADD-DIRECTORY-TO-WATCH and
-                                       REMOVE-DIRECTORY-FROM-WATCH,
-                                       for more info see CALLBACK.")
-    (alive-p :reader alive-p
-             :initform nil
-             :type boolean
-             :documentation "To check if watcher is alive and running.")
-    (recursive-p :reader recursive-p
-                 :initarg :recursive-p
-                 :initform nil
-                 :type boolean
-                 :transactional nil
-                 :documentation "If T all subdirectories of DIR will
-                                 be watched too, if NIL just DIR is
-                                 watched."))))
+(defclass watcher ()
+  ((dir :reader dir
+        :initarg :dir
+        :initform (error "specify a directory!")
+        :type string
+        :documentation "Main or Root Directory which will be watched,
+        if RECURSIVE-P is t all its subdirectories will be watched
+        too.")
+   (thread :reader thread
+           :type bt:thread
+           :documentation "BT:THREAD which will run the event-loop, on
+           Creation of WATCHER the THREAD will be created. Thread will
+           finish if DIR gets deleted or STOP-WATCHER is called.")
+   (hook :accessor hook
+         :initarg :hook
+         :initform nil
+         :type function
+         :documentation "The function which gets called if a event
+         occurs. HOOk needs to be a FUNCTION which takes 3
+         arguments. It will be called with the Watcher Object, the
+         filename and the Event-type.
+
+         Setting HOOK to NIL will disable it.
+
+         Event-type is one of the following:
+
+         :file-added (will always be followed by a :file-changed event
+                     with the same path)
+         :file-removed
+         :file-changed
+         :directory-added
+         :directory-removed
+         :on-deleted (given if the main directory, which is watched by
+                     WATCHER (:dir initarg to make-instance), is
+                     deleted. If the Hook returns the Event Loop will
+                     finish and the Watcher THREAD will terminate)
+
+         If a directory is added and RECURSIVE-P is true, the
+         directory will automatically be added to the watched list. If
+         a subdirectory gets deleted the handle will be deleted
+         too. So there is no need to handle those.
+
+         Example:
+         (setf (hook my-watcher-obj)
+               (lambda (watcher path event-type)
+                 (format t \"Hook from Watcher ~a was called!~%\"
+                         watcher)
+                 (format t \"File ~a, Event: ~a!~%\"
+                         path event-type)))")
+   (directory-handles :reader directory-handles
+                      :initform (make-hash-table :test 'equal)
+                      :type hash-table
+                      :documentation "Hash-table of all watched
+                      directories, if RECURSIVE-P is NIL this
+                      Hash-table will only contain the DIR handle. If
+                      RECURSIVE-P is T it will contain updated in case
+                      a directory is added or removed. Do not set
+                      member by Hand, these will be updated by
+                      ADD-DIRECTORY-TO-WATCH and
+                      REMOVE-DIRECTORY-FROM-WATCH, for more info see
+                      CALLBACK.")
+   (alive-p :reader alive-p
+            :initform nil
+            :type boolean
+            :documentation "To check if watcher is alive and
+            running.")
+   (recursive-p :reader recursive-p
+                :initarg :recursive-p
+                :initform nil
+                :type boolean
+                :documentation "If T all subdirectories of DIR will be
+                watched too, if NIL just DIR is watched.")))
 
 (defun get-event-type (filename renamed-p changed-p)
   "Will determine the Event-Type by using UIOP:DIRECTORY-EXISTS-P and
@@ -175,8 +177,7 @@ For more Details see the actual error message.
                                    (lambda (h f e s)
                                      (callback watcher h f e s)))
                       nil)))
-      (stmx:atomic
-       (setf (gethash dir table) handle)))))
+      (setf (gethash dir table) handle))))
 
 (defun add-directory-to-watch (watcher dir)
   "adds dir to watcher, can be safetly called by any thread, will
@@ -205,8 +206,7 @@ For more Details see the actual error message.
       ;; only call fs-unwatch if there is a handle. (handles are NIL
       ;; if RECURSIVE-P is NIL)
       (as:fs-unwatch handle))
-    (stmx:atomic
-     (remhash dir table))))
+    (remhash dir table)))
 
 (defun get-handle-path (handle)
   "gets the path (string) of the given cl-async fs-handle."
@@ -272,8 +272,7 @@ For more Details see the actual error message.
       (when fn
         (funcall fn watcher full-filename event-type)))
     (when (eql event-type :on-deleted)
-      (stmx:atomic
-       (setf (slot-value watcher 'alive-p) nil)))))
+      (setf (slot-value watcher 'alive-p) nil))))
 
 (defun watcher-event-loop (watcher)
   "Watcher event loop, will be called by the watcher thread. This
@@ -300,8 +299,7 @@ For more Details see the actual error message.
          ;; we can call add-dir directly here, since we are inside the
          ;; event-loop thread
          :do (add-dir watcher dir))
-      (stmx:atomic
-       (setf (slot-value watcher 'alive-p) t)))))
+      (setf (slot-value watcher 'alive-p) t))))
 
 ;; overwrite constructor and set DIR to a absolute Path, also start
 ;; the event-loop Thread
@@ -319,41 +317,6 @@ For more Details see the actual error message.
           (bt:make-thread (lambda () (watcher-event-loop w))
                           :name (format nil "directory-watcher ~a" fullpath)))))
 
-(defun set-hook (watcher hook-fn)
-  "WATCHER is the watcher object the HOOK-FN should be set to.
-   If a hook was already set, it will be overwritten!
-
-   Calling SET-HOOK with HOOK-FN NIL will disable the Hook.
-
-   HOOK-FN should be a function witch takes 3 arguments, it will be called with the
-   watcher object, the path and the type of event.
-   the event type is one of the following:
-
-
-   :file-added (will always be followed by a :file-changed event with the same path)
-   :file-removed
-   :file-changed
-   :directory-added
-   :directory-removed
-   :on-deleted (given if the main directory, which is watched by
-                WATCHER (:dir initarg to make-instance), is
-                deleted. If the Hook returns the Event Loop will
-                finish and the Watcher THREAD will terminate)
-
-   If a directory is added and RECURSIVE-P is true, the directory will
-   automatically be added to the watched list. If a subdirectory gets
-   deleted the handle will be deleted too. So there is no need to
-   handle those.
-
-   Example:
-   (set-hook my-watcher-obj
-             (lambda (watcher path event-type)
-               (format t \"Hook from Watcher ~a was called!~%\" watcher)
-               (format t \"File ~a, Event: ~a!~%\" path event-type)))"
-  (stmx:atomic
-   (setf (slot-value watcher 'hook)
-         hook-fn)))
-
 (defun stop-watcher (watcher)
   "Will stop the Watcher. Removes all handles and joins the watcher
    thread. The given WATCHER can be deleted when STOP-WATCHER
@@ -364,11 +327,9 @@ For more Details see the actual error message.
              (let ((handle (gethash path table)))
                (when handle
                  (as:fs-unwatch handle)))
-             (stmx:atomic
-              (remhash path table))))
+             (remhash path table)))
     (bt:join-thread (thread watcher))
-    (stmx:atomic
-     (setf (slot-value watcher 'alive-p) nil))))
+    (setf (slot-value watcher 'alive-p) nil)))
 
 (defun get-all-tracked-files (watcher)
   "returns all files (excluding directories) which are tracked by the
