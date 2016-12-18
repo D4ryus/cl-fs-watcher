@@ -159,7 +159,12 @@ and to stop the Watcher and cleanup all its resources use:
                 directory-exists-p)
            :directory-added)
           (t
-           (error "TODO: could not determine event type in GET-EVENT-TYPE")))))
+           (error (format nil
+                          (concatenate 'string
+                                       "Could not determine event type in GET-EVENT-TYPE, file: ~a~%"
+                                       "(file-exists-p: ~a, directory-exists-p: ~a, renamed-p: ~a, changed-p: ~a)")
+                          filename
+                          file-exists-p directory-exists-p renamed-p changed-p filename))))))
 
 (defun add-dir (watcher dir)
   "adds the specified dir to watcher, this function has to be called
