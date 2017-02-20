@@ -172,17 +172,39 @@ and to stop the Watcher and cleanup all its resources use:
   (let ((table (directory-handles watcher)))
     (multiple-value-bind (value present-p) (gethash dir table)
       (declare (ignore value))
-      (when present-p
-        (format t "ERROR: Key was already Present!~%")))
-    (let ((handle (if (or (recursive-p watcher)
-                          (string= (dir watcher) dir))
-                      ;; add a fs-watch if either RECURSIVE-P is true
-                      ;; or its the main directory
-                      (as:fs-watch dir
-                                   (lambda (h f e s)
-                                     (callback watcher h f e s)))
-                      nil)))
-      (setf (gethash dir table) handle))))
+      (unless present-p
+        (let ((handle (if (or (recursive-p watcher)
+                              (string= (dir watcher) dir))
+                          ;; add a fs-watch if either RECURSIVE-P is true
+                          ;; or its the main directory
+                          (as:fs-watch dir
+                                       (lambda (h f e s)
+                                         (callback watcher h f e s)))
+                          nil)))
+          (setf (gethash dir table) handle)
+          ;; this is _not_ nice... but there is no way to tell if we
+          ;; attached the handler fast enough. Since the OS could have
+          ;; already put some files inside the folder before we
+          ;; attached the handler. To (somewhat) fix that this will
+          ;; throw :file-created callbacks for each file, already
+          ;; inside the directory. The ugly part is that this will
+          ;; likely create duplicated :file-created events, since
+          ;; files could have been created while the handler was
+          ;; attached, but before this dolist finishes. But at least
+          ;; this will catch all files.
+          (dolist (sub-file (uiop:directory-files dir))
+            (callback watcher handle (subseq (format nil "~a" sub-file)
+                                             (length (get-handle-path handle)))
+                      t
+                      nil))
+          ;; this makes sure that we dont miss any added directory
+          ;; events. In case ADD-DIR is called with a sub-directoy
+          ;; (from a filesystem event callback) which we already added
+          ;; by iterating over all sub-directories, ADD-DIR will
+          ;; return.
+          (when (recursive-p watcher)
+            (dolist (sub-dir (uiop:subdirectories dir))
+              (add-dir watcher (format nil "~a" sub-dir)))))))))
 
 (defun add-directory-to-watch (watcher dir)
   "adds dir to watcher, can be safetly called by any thread, will
