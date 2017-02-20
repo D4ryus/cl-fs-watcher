@@ -4,7 +4,7 @@
   :description "Filesystem Watcher using cl-async."
   :author "d4ryus <d4ryus@openmailbox.org>"
   :license "LLGPL"
-  :depends-on (#:cl-async)
+  :depends-on (#:cl-async #:lparallel)
   :serial t
   :components ((:file "package")
                (:file "cl-fs-watcher")))

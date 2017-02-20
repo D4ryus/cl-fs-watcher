@@ -70,6 +70,17 @@ and to stop the Watcher and cleanup all its resources use:
            :documentation "BT:THREAD which will run the event-loop, on
            Creation of WATCHER the THREAD will be created. Thread will
            finish if DIR gets deleted or STOP-WATCHER is called.")
+   (hook-queue :reader hook-queue
+               :type lparallel.queue:queue
+               :initform (lparallel.queue:make-queue)
+               :documentation "Queue which holds all hooks in order,
+               the event-loop will push hooks onto it and HOOK-THREAD
+               will consume and run them.")
+   (hook-thread :reader hook-thread
+                :type bt:thread
+                :documentation "BT:THREAD which calls the attached
+                hook so that the event loop does not get blocked on
+                longer running hooks.")
    (hook :accessor hook
          :initarg :hook
          :initform nil
@@ -293,11 +304,16 @@ and to stop the Watcher and cleanup all its resources use:
       (:on-deleted
        ;; if watcher directory got removed, remove its handle too, so
        ;; that the event loop can finish
-       (remove-directory-from-watch watcher full-filename)))
+       (remove-directory-from-watch watcher full-filename)
+       ;; call to stop-watcher to also terminate the hook-thread
+       (stop-watcher watcher)))
     ;; lets check if hook is set, and if so call it
     (let ((fn (hook watcher)))
       (when fn
-        (funcall fn watcher full-filename event-type)))
+        (lparallel.queue:push-queue
+         (lambda ()
+           (funcall fn watcher full-filename event-type))
+         (slot-value watcher 'hook-queue))))
     (when (eql event-type :on-deleted)
       (setf (slot-value watcher 'alive-p) nil))))
 
@@ -330,19 +346,25 @@ and to stop the Watcher and cleanup all its resources use:
 
 ;; overwrite constructor and set DIR to a absolute Path, also start
 ;; the event-loop Thread
-(defmethod initialize-instance ((w watcher) &rest initargs)
-  (call-next-method)
+(defmethod initialize-instance :after ((watcher watcher) &rest initargs)
   ;; get fullpath as string and check if something went wrong
-  (let ((fullpath (car (directory (getf initargs :dir)))))
-    (unless fullpath
-      (error "TODO: ERROR: The given Directory does not exist (or is
+  (with-slots (dir thread hook-thread hook-queue) watcher
+    (let ((fullpath (car (directory (getf initargs :dir)))))
+      (unless fullpath
+        (error "TODO: ERROR: The given Directory does not exist (or is
               fishy). calling DIRECTORY on it returned NIL."))
-    (setf (slot-value w 'dir) (format nil "~a" fullpath))
-    ;; add hook to call CALLBACK with watcher and args. CALLBACK will
-    ;; then figure out which type of event happend etc.
-    (setf (slot-value w 'thread)
-          (bt:make-thread (lambda () (watcher-event-loop w))
-                          :name (format nil "directory-watcher ~a" fullpath)))))
+      (setf dir (format nil "~a" fullpath))
+      ;; add hook to call CALLBACK with watcher and args. CALLBACK will
+      ;; then figure out which type of event happend etc.
+      (setf thread
+            (bt:make-thread (lambda () (watcher-event-loop watcher))
+                            :name (format nil "cl-fs-watcher:event-loop ~a" fullpath)))
+      (setf hook-thread
+            (bt:make-thread (lambda ()
+                              (loop :for hook = (lparallel.queue:pop-queue hook-queue)
+                                    :while (not (eql hook :stop))
+                                    :do (funcall hook)))
+                            :name (format nil "cl-fs-watcher:hook-thread ~a" fullpath))))))
 
 (defun stop-watcher (watcher)
   "Will stop the Watcher. Removes all handles and joins the watcher
@@ -355,6 +377,9 @@ and to stop the Watcher and cleanup all its resources use:
                (when handle
                  (as:fs-unwatch handle)))
              (remhash path table)))
+    (lparallel.queue:push-queue :stop
+                                (slot-value watcher 'hook-queue))
+    (bt:join-thread (hook-thread watcher))
     (bt:join-thread (thread watcher))
     (setf (slot-value watcher 'alive-p) nil)))
 

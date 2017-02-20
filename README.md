@@ -5,6 +5,7 @@ A Simple Filesystem Watcher to monitor a given directory for changes. This is _A
 ## Dependencies
 
 - [cl-async](https://github.com/orthecreedence/cl-async) (Available through [Quicklisp](https://www.quicklisp.org/beta/))
+- [lparallel](https://lparallel.org/) (Available through [Quicklisp](https://www.quicklisp.org/beta/))
 
 ## Installation
 
