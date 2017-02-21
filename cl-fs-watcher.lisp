@@ -169,6 +169,14 @@ and to stop the Watcher and cleanup all its resources use:
                 (not file-exists-p)
                 directory-exists-p)
            :directory-added)
+          ;; if we get a change event but the file is already gone
+          ;; ignore it. It should be fine since a file-removed event
+          ;; will follow.
+          ((and (not renamed-p)
+                changed-p
+                (not file-exists-p)
+                (not directory-exists-p))
+           nil)
           (t
            (error (format nil
                           (concatenate 'string
@@ -284,6 +292,8 @@ and to stop the Watcher and cleanup all its resources use:
         (setf event-type (get-event-type full-filename renamed-p changed-p)))
     ;; lets check if a directory was removed, just add a trailing /
     ;; and see if its inside directory-handles
+    (unless event-type
+      (return-from callback))
     (when (eql event-type :file-removed)
       (let ((dir-name (concatenate 'string full-filename "/")))
         (multiple-value-bind (value present-p)
