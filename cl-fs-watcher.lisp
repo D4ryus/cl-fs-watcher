@@ -404,3 +404,12 @@ and to stop the Watcher and cleanup all its resources use:
              :using (hash-value value)
              :if value
              :collect (uiop:directory-files key)))))
+
+(defun busy-p (watcher)
+  "Returns t if Watcher is 'busy' and there are items on the
+  hook-queue. nil if hook-queue is empty and watcher is 'idle'."
+  (if (lparallel.queue:queue-empty-p (hook-queue watcher))
+      ;; queue emptry, not busy
+      nil
+      ;; queue has items, busy
+      t))

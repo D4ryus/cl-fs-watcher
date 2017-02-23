@@ -13,4 +13,5 @@
            ;; functions
            #:set-hook
            #:stop-watcher
-           #:get-all-tracked-files))
+           #:get-all-tracked-files
+           #:busy-p))
