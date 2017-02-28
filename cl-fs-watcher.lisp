@@ -22,8 +22,7 @@ For example:
                                      (format t "it happened to: ~a, event: ~a~%"
                                              path event))))
 
-watcher is the WATCHER the event occured on. Usefull if multiple
-watcher are used.
+(start-watcher *my-watcher*)
 
 path is the absolute path to the changed file, so if i-was-changed.txt
 inside ~/watch-me/some-dir/ is changed, the path will be (if $HOME is
@@ -360,23 +359,35 @@ and to stop the Watcher and cleanup all its resources use:
 ;; the event-loop Thread
 (defmethod initialize-instance :after ((watcher watcher) &rest initargs)
   ;; get fullpath as string and check if something went wrong
-  (with-slots (dir thread hook-thread hook-queue) watcher
-    (let ((fullpath (car (directory (getf initargs :dir)))))
-      (unless fullpath
-        (error "TODO: ERROR: The given Directory does not exist (or is
-              fishy). calling DIRECTORY on it returned NIL."))
-      (setf dir (format nil "~a" fullpath))
-      ;; add hook to call CALLBACK with watcher and args. CALLBACK will
-      ;; then figure out which type of event happend etc.
+  (with-slots (dir) watcher
+    (let ((fullpath (car (directory dir))))
+      (if fullpath
+          (setf dir (format nil "~a" fullpath))
+          (error "TODO: ERROR: The given Directory does not exist (or is
+                 fishy, no read rights for example). calling DIRECTORY
+                 on it returned NIL.")))))
+
+(defun start-watcher (watcher &optional thread-local-bindings)
+  "starts the given watcher (starts watcher-event-loop thread and
+  hook-thread). THREAD-LOCAL-BINDINGS is a alist of bindings which
+  will be set via PROGV inside the threads."
+  (with-slots (thread hook-thread hook-queue dir) watcher
+    (let ((symbols (map 'list #'car thread-local-bindings))
+          (values (map 'list #'cdr thread-local-bindings)))
       (setf thread
-            (bt:make-thread (lambda () (watcher-event-loop watcher))
-                            :name (format nil "cl-fs-watcher:event-loop ~a" fullpath)))
+            (bt:make-thread
+             (lambda ()
+               (progv symbols values
+                 (watcher-event-loop watcher)))
+             :name (format nil "cl-fs-watcher:event-loop ~a" dir)))
       (setf hook-thread
-            (bt:make-thread (lambda ()
-                              (loop :for hook = (lparallel.queue:pop-queue hook-queue)
-                                    :while (not (eql hook :stop))
-                                    :do (funcall hook)))
-                            :name (format nil "cl-fs-watcher:hook-thread ~a" fullpath))))))
+            (bt:make-thread
+             (lambda ()
+               (progv symbols values
+                 (loop :for hook = (lparallel.queue:pop-queue hook-queue)
+                       :while (not (eql hook :stop))
+                       :do (funcall hook))))
+             :name (format nil "cl-fs-watcher:hook-thread ~a" dir))))))
 
 (defun stop-watcher (watcher)
   "Will stop the Watcher. Removes all handles and joins the watcher

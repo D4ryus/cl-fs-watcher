@@ -28,6 +28,8 @@ To start Watching ```~/watch-me/``` for changes run:
                              :recursive-p t     ;; also watch all subdirectories
                              :hook #'callback))
 
+(start-watcher *my-watcher*)
+
 ```
 
 ```callback``` will be called if something changes on ```~/watch-me/``` or its subdirectories. The First argument to ```callback``` will be the watcher object itself (here ```*my-watcher*```), path will be the absolute path to the modified file and event-type will be one of the following:

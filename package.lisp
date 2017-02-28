@@ -12,6 +12,7 @@
 
            ;; functions
            #:set-hook
+           #:start-watcher
            #:stop-watcher
            #:get-all-tracked-files
            #:busy-p))
