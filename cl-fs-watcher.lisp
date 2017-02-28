@@ -20,7 +20,10 @@ For example:
                                      (format t "something happend on watcher: ~a, which watches: ~a!~%"
                                              watcher (dir watcher))
                                      (format t "it happened to: ~a, event: ~a~%"
-                                             path event))))
+                                             path event-type))
+                             :error-cb (lambda (ev)
+                                         (format t "ERROR: ~a" ev)
+                                         (stop-watcher *my-watcher*))))
 
 (start-watcher *my-watcher*)
 
@@ -140,7 +143,17 @@ and to stop the Watcher and cleanup all its resources use:
                 :initform nil
                 :type boolean
                 :documentation "If T all subdirectories of DIR will be
-                watched too, if NIL just DIR is watched.")))
+                watched too, if NIL just DIR is watched.")
+   (error-cb :reader error-cb
+             :initarg :error-cb
+             :initform nil
+             :type function
+             :documentation "Callback which gets called when a error
+             is thrown. If unset the error wont be catched. Takes a
+             single arugment, the error condition. Its set as the
+             *default-event-handler*. Checkout
+             http://orthecreedence.github.io/cl-async/event-handling#application-error-handling
+             for more information.")))
 
 (defun get-event-type (filename renamed-p changed-p)
   "Will determine the Event-Type by using UIOP:DIRECTORY-EXISTS-P and
@@ -347,7 +360,7 @@ and to stop the Watcher and cleanup all its resources use:
           (loop
              :for dir :in (uiop:subdirectories root-dir)
              :do (push (format nil "~a" dir) initial-directories))))
-    (as:with-event-loop (:catch-app-errors t)
+    (as:with-event-loop (:catch-app-errors (error-cb watcher))
       (loop
          :for dir :in initial-directories
          ;; we can call add-dir directly here, since we are inside the

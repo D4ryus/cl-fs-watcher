@@ -15,4 +15,5 @@
            #:start-watcher
            #:stop-watcher
            #:get-all-tracked-files
-           #:busy-p))
+           #:busy-p
+           #:error-cb))

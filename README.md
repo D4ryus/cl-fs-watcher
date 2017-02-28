@@ -26,7 +26,10 @@ To start Watching ```~/watch-me/``` for changes run:
               (make-instance 'cl-fs-watcher:watcher
                              :dir "~/watch-me/" ;; watch ~/watch-me/
                              :recursive-p t     ;; also watch all subdirectories
-                             :hook #'callback))
+                             :hook #'callback
+                             :error-cb (lambda (ev)
+                                         (format t "ERROR: ~a" ev)
+                                         (stop-watcher *my-watcher*))))
 
 (start-watcher *my-watcher*)
 
