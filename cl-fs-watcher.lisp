@@ -16,7 +16,7 @@ For example:
               (make-instance 'watcher
                              :dir "~/watch-me/" ;; watch ~/watch-me/
                              :recursive-p t     ;; also watch all subdirectories of ~/watch-me/
-                             :hook (lambda (watcher path type) ;; call this function if anything happens
+                             :hook (lambda (watcher path event-type) ;; call this function if anything happens
                                      (format t "something happend on watcher: ~a, which watches: ~a!~%"
                                              watcher (dir watcher))
                                      (format t "it happened to: ~a, event: ~a~%"
