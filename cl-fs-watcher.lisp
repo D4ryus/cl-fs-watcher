@@ -67,6 +67,7 @@ and to stop the Watcher and cleanup all its resources use:
         too.")
    (thread :reader thread
            :type bt:thread
+           :initform nil
            :documentation "BT:THREAD which will run the event-loop, on
            Creation of WATCHER the THREAD will be created. Thread will
            finish if DIR gets deleted or STOP-WATCHER is called.")
@@ -77,6 +78,7 @@ and to stop the Watcher and cleanup all its resources use:
                the event-loop will push hooks onto it and HOOK-THREAD
                will consume and run them.")
    (hook-thread :reader hook-thread
+                :initform nil
                 :type bt:thread
                 :documentation "BT:THREAD which calls the attached
                 hook so that the event loop does not get blocked on
@@ -380,18 +382,22 @@ and to stop the Watcher and cleanup all its resources use:
   "Will stop the Watcher. Removes all handles and joins the watcher
    thread. The given WATCHER can be deleted when STOP-WATCHER
    returns."
-  (let ((table (directory-handles watcher)))
-    (loop :for path :being :the :hash-key :of table
-       :do (progn
-             (let ((handle (gethash path table)))
-               (when handle
-                 (as:fs-unwatch handle)))
-             (remhash path table)))
-    (lparallel.queue:push-queue :stop
-                                (slot-value watcher 'hook-queue))
-    (bt:join-thread (hook-thread watcher))
-    (bt:join-thread (thread watcher))
-    (setf (slot-value watcher 'alive-p) nil)))
+  (with-slots (thread hook-thread hook-queue alive-p directory-handles)
+      watcher
+    (loop :for path :being :the :hash-key :of directory-handles
+          :do (progn
+                (let ((handle (gethash path directory-handles)))
+                  (when handle
+                    (as:fs-unwatch handle)))
+                (remhash path directory-handles)))
+    (lparallel.queue:push-queue :stop hook-queue)
+    (when (and hook-thread
+               (not (equal (bt:current-thread) hook-thread)))
+      (bt:join-thread hook-thread))
+    (when (and thread
+               (not (equal (bt:current-thread) thread)))
+      (bt:join-thread thread))
+    (setf alive-p nil)))
 
 (defun get-all-tracked-files (watcher)
   "returns all files (excluding directories) which are tracked by the
