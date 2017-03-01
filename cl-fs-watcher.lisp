@@ -326,10 +326,12 @@ and to stop the Watcher and cleanup all its resources use:
             (return-from callback))
         ;; some other event besides :on-deleted and :directory-removed
         (setf event-type (get-event-type full-filename renamed-p changed-p)))
-    ;; lets check if a directory was removed, just add a trailing /
-    ;; and see if its inside directory-handles
+    ;; if event-type is nil, it could not be determined and we ignore
+    ;; the callback
     (unless event-type
       (return-from callback))
+    ;; lets check if a directory was removed, just add a trailing /
+    ;; and see if its inside directory-handles
     (when (eql event-type :file-removed)
       (let ((dir-name (concatenate 'string full-filename "/")))
         (multiple-value-bind (value present-p)
