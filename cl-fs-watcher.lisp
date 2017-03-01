@@ -293,8 +293,8 @@ and to stop the Watcher and cleanup all its resources use:
                                     (get-handle-path handle)
                                     filename)))
     (if (eql 0 (length filename))
-        (if (equalp (dir watcher)
-                    full-filename)
+        (if (equal (dir watcher)
+                   full-filename)
             ;; main directory got deleted
             (setf event-type :on-deleted)
             ;; in case it was not the main directory a subdirectory
