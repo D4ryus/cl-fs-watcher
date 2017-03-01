@@ -79,6 +79,19 @@ and to stop the Watcher and cleanup all its resources use:
                :documentation "Queue which holds all hooks in order,
                the event-loop will push hooks onto it and HOOK-THREAD
                will consume and run them.")
+   (event-loop-busy-p :type boolean
+                      :initform nil
+                      :documentation "Boolean (t or nil) which is set
+                      to t when the event-loop is currently processing
+                      a event (callback is called). If
+                      event-loop-busy-p is nil, the event-loop is
+                      waiting for new events.")
+   (hook-busy-p :type boolean
+                :initform nil
+                :documentation "Boolean (t or nil) which is set to t
+                when hook-thread is currently processing a hook (aka
+                is busy). If hook-busy-p is nil, the Hook-Thread is
+                waiting for new events.")
    (hook-thread :reader hook-thread
                 :initform nil
                 :type bt:thread
@@ -284,10 +297,19 @@ and to stop the Watcher and cleanup all its resources use:
     (cffi:foreign-free size)
     result))
 
-(defun callback (watcher handle filename renamed-p changed-p)
-  "the main callback which gets called if a Event occures. This
+(defgeneric callback (watcher handle filename renamed-p changed-p)
+  (:documentation "the main callback which gets called if a Event occures. This
    function will determine the event type and then call the hook
-   function, if set."
+   function, if set."))
+
+(defmethod callback :around ((watcher watcher) handle filename renamed-p changed-p)
+  (with-slots (event-loop-busy-p) watcher
+    (setf event-loop-busy-p t)
+    (unwind-protect
+         (call-next-method)
+      (setf event-loop-busy-p nil))))
+
+(defmethod callback ((watcher watcher) handle filename renamed-p changed-p)
   (let ((event-type nil)
         (full-filename (concatenate 'string
                                     (get-handle-path handle)
@@ -384,7 +406,7 @@ and to stop the Watcher and cleanup all its resources use:
   "starts the given watcher (starts watcher-event-loop thread and
   hook-thread). THREAD-LOCAL-BINDINGS is a alist of bindings which
   will be set via PROGV inside the threads."
-  (with-slots (thread hook-thread hook-queue dir) watcher
+  (with-slots (thread hook-thread hook-queue dir hook-busy-p) watcher
     (let ((symbols (map 'list #'car thread-local-bindings))
           (values (map 'list #'cdr thread-local-bindings)))
       (setf thread
@@ -399,7 +421,11 @@ and to stop the Watcher and cleanup all its resources use:
                (progv symbols values
                  (loop :for hook = (lparallel.queue:pop-queue hook-queue)
                        :while (not (eql hook :stop))
-                       :do (funcall hook))))
+                       :do (progn
+                             (setf hook-busy-p t)
+                             (unwind-protect
+                                  (funcall hook)
+                               (setf hook-busy-p nil))))))
              :name (format nil "cl-fs-watcher:hook-thread ~a" dir))))))
 
 (defun stop-watcher (watcher)
@@ -438,8 +464,12 @@ and to stop the Watcher and cleanup all its resources use:
 (defun busy-p (watcher)
   "Returns t if Watcher is 'busy' and there are items on the
   hook-queue. nil if hook-queue is empty and watcher is 'idle'."
-  (if (lparallel.queue:queue-empty-p (hook-queue watcher))
-      ;; queue emptry, not busy
-      nil
-      ;; queue has items, busy
-      t))
+  ;; (funcall (slot-value watcher 'dump))
+  (with-slots (hook-busy-p event-loop-busy-p alive-p hook-queue thread)
+      watcher
+    (if (or hook-busy-p
+            event-loop-busy-p
+            (and (not alive-p) (bt:thread-alive-p thread))
+            (not (lparallel.queue:queue-empty-p hook-queue)))
+        t
+        nil)))
