@@ -166,7 +166,8 @@ and to stop the Watcher and cleanup all its resources use:
              single arugment, the error condition. Its set as the
              *default-event-handler*. Checkout
              http://orthecreedence.github.io/cl-async/event-handling#application-error-handling
-             for more information.")))
+             for more information. This callback also gets called if a
+             error occures by calling hook.")))
 
 (defun get-event-type (filename renamed-p changed-p)
   "Will determine the Event-Type by using UIOP:DIRECTORY-EXISTS-P and
@@ -404,11 +405,28 @@ and to stop the Watcher and cleanup all its resources use:
                  fishy, no read rights for example). calling DIRECTORY
                  on it returned NIL.")))))
 
+(defun hook-thread-main-loop (watcher)
+  "Main Function of hook-thread. If watcher gets started, the
+  hook-thread will call this function."
+  (with-slots (hook-queue error-cb hook-busy-p) watcher
+    (loop :for hook = (lparallel.queue:pop-queue hook-queue)
+          :while (not (eql hook :stop))
+          :do (progn
+                (setf hook-busy-p t)
+                (unwind-protect
+                     (handler-case
+                         (funcall hook)
+                       (error (ev)
+                         (if error-cb
+                             (funcall error-cb ev)
+                             (error ev))))
+                  (setf hook-busy-p nil))))))
+
 (defun start-watcher (watcher &optional thread-local-bindings)
   "starts the given watcher (starts watcher-event-loop thread and
   hook-thread). THREAD-LOCAL-BINDINGS is a alist of bindings which
   will be set via PROGV inside the threads."
-  (with-slots (thread hook-thread hook-queue dir hook-busy-p) watcher
+  (with-slots (thread hook-thread dir) watcher
     (let ((symbols (map 'list #'car thread-local-bindings))
           (values (map 'list #'cdr thread-local-bindings)))
       (setf thread
@@ -421,13 +439,7 @@ and to stop the Watcher and cleanup all its resources use:
             (bt:make-thread
              (lambda ()
                (progv symbols values
-                 (loop :for hook = (lparallel.queue:pop-queue hook-queue)
-                       :while (not (eql hook :stop))
-                       :do (progn
-                             (setf hook-busy-p t)
-                             (unwind-protect
-                                  (funcall hook)
-                               (setf hook-busy-p nil))))))
+                 (hook-thread-main-loop watcher)))
              :name (format nil "cl-fs-watcher:hook-thread ~a" dir))))))
 
 (defun stop-watcher (watcher)
@@ -436,19 +448,15 @@ and to stop the Watcher and cleanup all its resources use:
    returns."
   (with-slots (thread hook-thread hook-queue alive-p directory-handles)
       watcher
+    ;; unwatch all handles to stop event-loop-thread
     (loop :for path :being :the :hash-key :of directory-handles
           :do (progn
                 (let ((handle (gethash path directory-handles)))
                   (when handle
                     (as:fs-unwatch handle)))
                 (remhash path directory-handles)))
+    ;; push :stop keyword onto hook-queue to stop hook-thread
     (lparallel.queue:push-queue :stop hook-queue)
-    (when (and hook-thread
-               (not (equal (bt:current-thread) hook-thread)))
-      (bt:join-thread hook-thread))
-    (when (and thread
-               (not (equal (bt:current-thread) thread)))
-      (bt:join-thread thread))
     (setf alive-p nil)))
 
 (defun get-all-tracked-files (watcher)
