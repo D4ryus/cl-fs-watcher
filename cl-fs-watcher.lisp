@@ -67,6 +67,17 @@ and to stop the Watcher and cleanup all its resources use:
         :documentation "Main or Root Directory which will be watched,
         if RECURSIVE-P is t all its subdirectories will be watched
         too.")
+   (ignore-duplicated :reader ignore-duplicated
+                      :initarg :ignore-duplicated
+                      :initform t
+                      :type boolean
+                      :documentation "Flag to ignore duplicated
+                      events. If set to t hook will not be called when
+                      the current event equals the next event. For
+                      example if the current event is :file-changed
+                      \"/blub.txt\" and the next event is also
+                      :file-changed \"/blub.txt\" hook will only be
+                      called once.")
    (thread :reader thread
            :type bt:thread
            :initform nil
@@ -354,8 +365,7 @@ and to stop the Watcher and cleanup all its resources use:
     (let ((fn (hook watcher)))
       (when fn
         (lparallel.queue:push-queue
-         (lambda ()
-           (funcall fn watcher full-filename event-type))
+         (list fn watcher full-filename event-type)
          (slot-value watcher 'hook-queue))))
     (when (eql event-type :on-deleted)
       (remove-directory-from-watch watcher full-filename)
@@ -403,19 +413,32 @@ and to stop the Watcher and cleanup all its resources use:
 (defun hook-thread-main-loop (watcher)
   "Main Function of hook-thread. If watcher gets started, the
   hook-thread will call this function."
-  (with-slots (hook-queue error-cb hook-busy-p) watcher
-    (loop :for hook = (lparallel.queue:pop-queue hook-queue)
-          :while (not (eql hook :stop))
-          :do (progn
-                (setf hook-busy-p t)
-                (unwind-protect
-                     (handler-case
-                         (funcall hook)
-                       (error (ev)
-                         (if error-cb
-                             (funcall error-cb ev)
-                             (error ev))))
-                  (setf hook-busy-p nil))))))
+  (with-slots (hook-queue error-cb hook-busy-p ignore-duplicated)
+      watcher
+    (loop :for event = (lparallel.queue:pop-queue hook-queue)
+          :while (not (eql event :stop))
+          :do (destructuring-bind (hook watcher filename event-type)
+                  event
+                (let ((skip nil))
+                  (when ignore-duplicated
+                    (let ((next (lparallel.queue:peek-queue hook-queue)))
+                      (unless (or (not next)
+                                  (eql next :stop))
+                        (destructuring-bind (nil nil n-filename n-event-type)
+                            next
+                          (when (and (equal filename n-filename)
+                                     (eql event-type n-event-type))
+                            (setf skip t))))))
+                  (unless skip
+                    (setf hook-busy-p t)
+                    (unwind-protect
+                         (handler-case
+                             (funcall hook watcher filename event-type)
+                           (error (ev)
+                             (if error-cb
+                                 (funcall error-cb ev)
+                                 (error ev))))
+                      (setf hook-busy-p nil))))))))
 
 (defun start-watcher (watcher &optional thread-local-bindings)
   "starts the given watcher (starts watcher-event-loop thread and
