@@ -349,13 +349,7 @@ and to stop the Watcher and cleanup all its resources use:
       (:directory-added
        (add-directory-to-watch watcher full-filename))
       (:directory-removed
-       (remove-directory-from-watch watcher full-filename))
-      (:on-deleted
-       ;; if watcher directory got removed, remove its handle too, so
-       ;; that the event loop can finish
-       (remove-directory-from-watch watcher full-filename)
-       ;; call to stop-watcher to also terminate the hook-thread
-       (stop-watcher watcher)))
+       (remove-directory-from-watch watcher full-filename)))
     ;; lets check if hook is set, and if so call it
     (let ((fn (hook watcher)))
       (when fn
@@ -364,7 +358,8 @@ and to stop the Watcher and cleanup all its resources use:
            (funcall fn watcher full-filename event-type))
          (slot-value watcher 'hook-queue))))
     (when (eql event-type :on-deleted)
-      (setf (slot-value watcher 'alive-p) nil))))
+      (remove-directory-from-watch watcher full-filename)
+      (stop-watcher watcher))))
 
 (defun watcher-event-loop (watcher)
   "Watcher event loop, will be called by the watcher thread. This
