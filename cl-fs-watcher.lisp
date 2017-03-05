@@ -67,17 +67,17 @@ and to stop the Watcher and cleanup all its resources use:
         :documentation "Main or Root Directory which will be watched,
         if RECURSIVE-P is t all its subdirectories will be watched
         too.")
-   (ignore-duplicated :reader ignore-duplicated
-                      :initarg :ignore-duplicated
-                      :initform t
-                      :type boolean
-                      :documentation "Flag to ignore duplicated
-                      events. If set to t hook will not be called when
-                      the current event equals the next event. For
-                      example if the current event is :file-changed
-                      \"/blub.txt\" and the next event is also
-                      :file-changed \"/blub.txt\" hook will only be
-                      called once.")
+   (skip-duplicated :reader skip-duplicated
+                    :initarg :skip-duplicated
+                    :initform t
+                    :type boolean
+                    :documentation "Flag to skip duplicated events. If
+                    set to t hook will not be called when the current
+                    event equals the next event. For example if the
+                    current event is :file-changed \"/blub.txt\" and
+                    the next event is also :file-changed
+                    \"/blub.txt\", then the first event will be
+                    skipped and hook will not be called.")
    (thread :reader thread
            :type bt:thread
            :initform nil
@@ -413,14 +413,14 @@ and to stop the Watcher and cleanup all its resources use:
 (defun hook-thread-main-loop (watcher)
   "Main Function of hook-thread. If watcher gets started, the
   hook-thread will call this function."
-  (with-slots (hook-queue error-cb hook-busy-p ignore-duplicated)
+  (with-slots (hook-queue error-cb hook-busy-p skip-duplicated)
       watcher
     (loop :for event = (lparallel.queue:pop-queue hook-queue)
           :while (not (eql event :stop))
           :do (destructuring-bind (hook watcher filename event-type)
                   event
                 (let ((skip nil))
-                  (when ignore-duplicated
+                  (when skip-duplicated
                     (let ((next (lparallel.queue:peek-queue hook-queue)))
                       (unless (or (not next)
                                   (eql next :stop))
