@@ -180,14 +180,59 @@ and to stop the Watcher and cleanup all its resources use:
              for more information. This callback also gets called if a
              error occures by calling hook.")))
 
+(defun escape-wildcards (thing &optional (escape-char #\\))
+  "Got the inspiration for that code from
+  sb-impl::unparse-physical-piece, credits go to Xach for finding it.
+  Thanks again for the helping me out"
+  (let* ((srclen (length thing))
+         (dstlen srclen))
+    (dotimes (i srclen)
+      (let ((char (char thing i)))
+        (case char
+          ((#\* #\? #\[)
+           (incf dstlen))
+          (t (when (char= char escape-char)
+               (incf dstlen))))))
+    (let ((result (make-string dstlen))
+          (dst 0))
+      (dotimes (src srclen)
+        (let ((char (char thing src)))
+          (case char
+            ((#\* #\? #\[)
+             (setf (char result dst) escape-char)
+             (incf dst))
+            (t (when (char= char escape-char)
+                 (setf (char result dst) escape-char)
+                 (incf dst))))
+          (setf (char result dst) char)
+          (incf dst)))
+      result)))
+
+(defun escaped-directory-exists-p (directory)
+  (uiop:directory-exists-p
+   (escape-wildcards directory)))
+
+(defun escaped-file-exists-p (file)
+  (uiop:file-exists-p
+   (escape-wildcards file)))
+
+(defun escaped-directory-files (directory &rest args)
+  (apply #'uiop:directory-files
+         (escape-wildcards directory)
+         args))
+
+(defun escaped-subdirectories (directory)
+  (uiop:subdirectories
+   (escape-wildcards directory)))
+
 (defun get-event-type (filename renamed-p changed-p)
-  "Will determine the Event-Type by using UIOP:DIRECTORY-EXISTS-P and
-   UIOP:FILE-EXISTS-P. Will return one of the following types:
-   :file-added, :file-removed, :file-changed, :directory-added.
-   Since its not possible to determine :directory-removed and
-   :on-delete a :file-removed will be returned instead."
-  (let ((file-exists-p (uiop:file-exists-p filename))
-        (directory-exists-p (uiop:directory-exists-p filename)))
+  "Will determine the Event-Type by using ESCAPED-DIRECTORY-EXISTS-P
+   and ESCAPED-FILE-EXISTS-P. Will return one of the following types:
+   :file-added, :file-removed, :file-changed, :directory-added.  Since
+   its not possible to determine :directory-removed and :on-delete a
+   :file-removed will be returned instead."
+  (let ((file-exists-p (escaped-file-exists-p filename))
+        (directory-exists-p (escaped-directory-exists-p filename)))
     (cond ((and renamed-p
                 (not changed-p)
                 file-exists-p
@@ -208,6 +253,14 @@ and to stop the Watcher and cleanup all its resources use:
                 (not file-exists-p)
                 directory-exists-p)
            :directory-added)
+          ;; i dont know what exactly it means to get a renamed and
+          ;; changed event on a directory, but it happens when 'touch'
+          ;; is run on a directory. Guess we could just ignore it.
+          ((and renamed-p
+                changed-p
+                (not file-exists-p)
+                directory-exists-p)
+           nil)
           ;; if we get a change event but the file is already gone
           ;; ignore it. It should be fine since a file-removed event
           ;; will follow.
@@ -218,51 +271,49 @@ and to stop the Watcher and cleanup all its resources use:
            nil)
           (t
            (error (format nil
-                          (concatenate 'string
-                                       "Could not determine event type in GET-EVENT-TYPE, file: ~a~%"
-                                       "(file-exists-p: ~a, directory-exists-p: ~a, renamed-p: ~a, changed-p: ~a)")
+                          "Could not determine event type in GET-EVENT-TYPE, file: ~a~%~
+                          (file-exists-p: ~a, directory-exists-p: ~a, renamed-p: ~a, changed-p: ~a)"
                           filename
-                          file-exists-p directory-exists-p renamed-p changed-p filename))))))
+                          file-exists-p directory-exists-p renamed-p changed-p))))))
 
 (defun add-dir (watcher dir)
   "adds the specified dir to watcher, this function has to be called
    from the watcher-thread! See also: ADD-DIRECTORY-TO-WATCH."
-  (let ((table (directory-handles watcher)))
-    (multiple-value-bind (value present-p) (gethash dir table)
-      (declare (ignore value))
-      (unless present-p
-        (let ((handle (if (or (recursive-p watcher)
-                              (string= (dir watcher) dir))
-                          ;; add a fs-watch if either RECURSIVE-P is true
-                          ;; or its the main directory
-                          (as:fs-watch dir
-                                       (lambda (h f e s)
-                                         (callback watcher h f e s)))
-                          nil)))
-          (setf (gethash dir table) handle)
-          ;; this is _not_ nice... but there is no way to tell if we
-          ;; attached the handler fast enough. Since the OS could have
-          ;; already put some files inside the folder before we
-          ;; attached the handler. To (somewhat) fix that this will
-          ;; throw :file-created callbacks for each file, already
-          ;; inside the directory. The ugly part is that this will
-          ;; likely create duplicated :file-created events, since
-          ;; files could have been created while the handler was
-          ;; attached, but before this dolist finishes. But at least
-          ;; this will catch all files.
-          (dolist (sub-file (uiop:directory-files dir))
-            (callback watcher handle (subseq (format nil "~a" sub-file)
-                                             (length (get-handle-path handle)))
-                      t
-                      nil))
-          ;; this makes sure that we dont miss any added directory
-          ;; events. In case ADD-DIR is called with a sub-directoy
-          ;; (from a filesystem event callback) which we already added
-          ;; by iterating over all sub-directories, ADD-DIR will
-          ;; return.
-          (when (recursive-p watcher)
-            (dolist (sub-dir (uiop:subdirectories dir))
-              (add-dir watcher (format nil "~a" sub-dir)))))))))
+  (when (or (recursive-p watcher)
+            (string= (dir watcher) dir))
+    (let ((table (directory-handles watcher)))
+      (multiple-value-bind (value present-p) (gethash dir table)
+        (declare (ignore value))
+        (unless present-p
+          (let ((handle (as:fs-watch dir
+                                     (lambda (h f e s)
+                                       (callback watcher h f e s)))))
+            (setf (gethash dir table) handle)
+            ;; this is _not_ nice... but there is no way to tell if we
+            ;; attached the handler fast enough. Since the OS could have
+            ;; already put some files inside the folder before we
+            ;; attached the handler. To (somewhat) fix that this will
+            ;; throw :file-created callbacks for each file, already
+            ;; inside the directory. The ugly part is that this will
+            ;; likely create duplicated :file-created events, since
+            ;; files could have been created while the handler was
+            ;; attached, but before this dolist finishes. But at least
+            ;; this will catch all files.
+            (dolist (sub-file (mapcar #'uiop:native-namestring
+                                      (escaped-directory-files dir)))
+              (callback watcher handle (subseq sub-file
+                                               (length (get-handle-path handle)))
+                        t
+                        nil))
+            ;; this makes sure that we dont miss any added directory
+            ;; events. In case ADD-DIR is called with a sub-directoy
+            ;; (from a filesystem event callback) which we already added
+            ;; by iterating over all sub-directories, ADD-DIR will
+            ;; return.
+            (when (recursive-p watcher)
+              (dolist (sub-dir (mapcar #'uiop:native-namestring
+                                       (escaped-subdirectories dir)))
+                (add-dir watcher sub-dir)))))))))
 
 (defun add-directory-to-watch (watcher dir)
   "adds dir to watcher, can be safetly called by any thread, will
@@ -368,7 +419,6 @@ and to stop the Watcher and cleanup all its resources use:
          (list fn watcher full-filename event-type)
          (slot-value watcher 'hook-queue))))
     (when (eql event-type :on-deleted)
-      (remove-directory-from-watch watcher full-filename)
       (stop-watcher watcher))))
 
 (defun watcher-event-loop (watcher)
@@ -377,38 +427,23 @@ and to stop the Watcher and cleanup all its resources use:
    only happen if STOP-WATCHER is called or the Main Directory gets
    deleted. This thread will get interrupted by
    add-directory-to-watch-dir if a new directory is added."
-  (let ((initial-directories (list))
-        (root-dir (dir watcher)))
-    (if (recursive-p watcher)
-        (uiop:collect-sub*directories (pathname root-dir)
-                                      t
-                                      t
-                                      (lambda (dir) (push (format nil "~a" dir)
-                                                          initial-directories)))
-        (progn
-          (push root-dir initial-directories)
-          (loop
-             :for dir :in (uiop:subdirectories root-dir)
-             :do (push (format nil "~a" dir) initial-directories))))
-    (as:with-event-loop (:catch-app-errors (error-cb watcher))
-      (loop
-         :for dir :in initial-directories
-         ;; we can call add-dir directly here, since we are inside the
-         ;; event-loop thread
-         :do (add-dir watcher dir))
-      (setf (slot-value watcher 'alive-p) t))))
+  (as:with-event-loop (:catch-app-errors (error-cb watcher))
+    (add-dir watcher (dir watcher))
+    (setf (slot-value watcher 'alive-p) t)))
 
 ;; overwrite constructor and set DIR to a absolute Path, also start
 ;; the event-loop Thread
 (defmethod initialize-instance :after ((watcher watcher) &rest initargs)
   ;; get fullpath as string and check if something went wrong
+  (declare (ignorable initargs))
   (with-slots (dir) watcher
-    (let ((fullpath (car (directory dir))))
+    (let ((fullpath (car (directory (escape-wildcards dir)))))
       (if fullpath
-          (setf dir (format nil "~a" fullpath))
-          (error "TODO: ERROR: The given Directory does not exist (or is
-                 fishy, no read rights for example). calling DIRECTORY
-                 on it returned NIL.")))))
+          (setf dir (uiop:native-namestring fullpath))
+          (error "ERROR: The given Directory does not exist (or cannot~
+                 be opened, no read/execute rights for example). calling~
+                 (DIRECTORY ~a) returned NIL."
+                 dir)))))
 
 (defun hook-thread-main-loop (watcher)
   "Main Function of hook-thread. If watcher gets started, the
@@ -480,14 +515,12 @@ and to stop the Watcher and cleanup all its resources use:
 (defun get-all-tracked-files (watcher)
   "returns all files (excluding directories) which are tracked by the
    given watcher"
-  (mapcar
-   (lambda (pathname) (format nil "~a" pathname))
-   (apply #'append
-          (loop
-             :for key :being :the :hash-keys :of (directory-handles watcher)
-             :using (hash-value value)
-             :if value
-             :collect (uiop:directory-files key)))))
+  (apply #'append
+         (loop
+           :for key :being :the :hash-keys :of (directory-handles watcher)
+           :using (hash-value value)
+           :if value
+           :collect key)))
 
 (defun busy-p (watcher)
   "Returns t if Watcher is 'busy' and there are items on the

@@ -11,6 +11,11 @@
            #:recursive-p
 
            ;; functions
+           #:escape-wildcards
+           #:escaped-directory-exists-p
+           #:escaped-file-exists-p
+           #:escaped-directory-files
+           #:escaped-subdirectories
            #:set-hook
            #:start-watcher
            #:stop-watcher

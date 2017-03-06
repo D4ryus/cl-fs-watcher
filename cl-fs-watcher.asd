@@ -5,7 +5,9 @@
   :author "d4ryus <d4ryus@openmailbox.org>"
   :license "LLGPL"
   :homepage "https://github.com/d4ryus/cl-fs-watcher"
-  :depends-on (#:cl-async #:lparallel)
+  :depends-on (#:cl-async
+               #:lparallel
+               #:uiop)
   :serial t
   :components ((:file "package")
                (:file "cl-fs-watcher")))
