@@ -8,7 +8,6 @@
            #:hook
            #:directory-handles
            #:alive-p
-           #:recursive-p
 
            ;; functions
            #:escape-wildcards

@@ -1,6 +1,6 @@
 # cl-fs-watcher
 
-A Simple Filesystem Watcher to monitor a given directory for changes. This is _ALPHA_ quality software and only works on Linux (for now).
+A Simple Filesystem Watcher to monitor a given directory for changes. This is _ALPHA_ quality software and only works on Linux and Windows (for now).
 
 ## Dependencies
 
@@ -16,23 +16,23 @@ Just clone it into ```quicklisp/local-project``` and run ```(ql:quickload :cl-fs
 To start Watching ```~/watch-me/``` for changes run:
 
 ```commonlisp
-(defun callback (watcher path event-type)
+(defun callback (watcher pathname event-type)
   (format t "something happend on watcher: ~a, which watches: ~a!~%"
             watcher (cl-fs-watcher:dir watcher))
   (format t "it happened to: ~a, event: ~a~%"
-            path event-type))
+            pathname event-type))
 
-(defparameter *my-watcher*
-              (make-instance 'cl-fs-watcher:watcher
-                             :dir "~/watch-me/" ;; watch ~/watch-me/
-                             :recursive-p t     ;; also watch all subdirectories
-                             :hook #'callback
-                             :error-cb (lambda (ev)
-                                         (format t "ERROR: ~a" ev)
-                                         (stop-watcher *my-watcher*))))
+(defparameter *my-watcher* nil)
+(setf *my-watcher*
+      (make-instance 'cl-fs-watcher:watcher
+                     :dir (pathname "~/watch-me/") ;; watch ~/watch-me/
+                     :recursive-p t ;; also watch all subdirectories
+                     :hook #'callback
+                     :error-cb (lambda (ev)
+                                 (format t "ERROR: ~a~%" ev)
+                                 (cl-fs-watcher:stop-watcher *my-watcher*))))
 
 (start-watcher *my-watcher*)
-
 ```
 
 ```callback``` will be called if something changes on ```~/watch-me/``` or its subdirectories. The First argument to ```callback``` will be the watcher object itself (here ```*my-watcher*```), path will be the absolute path to the modified file and event-type will be one of the following:
