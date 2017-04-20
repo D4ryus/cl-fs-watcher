@@ -379,20 +379,26 @@ sub-directories of pathname and call add-dir for each"
       (in-event-loop (watcher)
         (add-dir watcher pathname))))
 
-(defun remove-directory-from-watch (watcher dir)
+(defun remove-directory-from-watch (watcher pathname)
   "removes dir from watcher, can be safetly called by any thread, will
    use in-event-loop if BT:CURRENT-THREAD != (THREAD WATCHER)."
-  (let* ((table (directory-handles watcher))
-         (handle (gethash dir table)))
-    (when handle
-      ;; only call fs-unwatch if there is a handle. (these are nil on
-      ;; windows subdirectories)
-      (if (eql (bt:current-thread)
-               (thread watcher))
-          (as:fs-unwatch handle)
-          (in-event-loop (watcher)
-            (as:fs-unwatch handle))))
-    (remhash dir table)))
+  (let ((table (directory-handles watcher)))
+    (loop :for (remove-me . handle)
+          ;; collect all subdirectory handles (we also get sub
+          ;; directories of subdirectories)
+          :in (loop :for file-pathname :being :the :hash-keys :of table
+                    :using (hash-value handle)
+                    :when (uiop:subpathp file-pathname pathname)
+                    :collect (cons file-pathname handle))
+          ;; remove them and if there is a handle unwatch it
+          :do (progn
+                (remhash remove-me table)
+                (when handle
+                  (if (eql (bt:current-thread)
+                           (thread watcher))
+                      (as:fs-unwatch handle)
+                      (in-event-loop (watcher)
+                        (as:fs-unwatch handle))))))))
 
 (defun get-handle-path (handle)
   "gets the path (string) of the given cl-async fs-handle, returns a
