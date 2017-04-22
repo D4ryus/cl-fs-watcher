@@ -597,8 +597,9 @@ sub-directories of pathname and call add-dir for each"
       (loop :for path :being :the :hash-key :of directory-handles
             :do (remove-directory-from-watch watcher path nil))
       (in-event-loop (watcher)
-        (as:free-notifier queue-notifier)
-        (setf queue-notifier nil))
+        (when queue-notifier
+          (as:free-notifier queue-notifier)
+          (setf queue-notifier nil)))
       ;; push :stop keyword onto event-queue to stop hook-thread
       (lparallel.queue:push-queue :stop event-queue)
       (setf alive-p nil))))
