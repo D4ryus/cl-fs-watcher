@@ -379,26 +379,25 @@ sub-directories of pathname and call add-dir for each"
       (in-event-loop (watcher)
         (add-dir watcher pathname))))
 
-(defun remove-directory-from-watch (watcher pathname)
+(defun remove-directory-from-watch (watcher pathname &optional (remove-subdirectories t))
   "removes dir from watcher, can be safetly called by any thread, will
    use in-event-loop if BT:CURRENT-THREAD != (THREAD WATCHER)."
-  (let ((table (directory-handles watcher)))
-    (loop :for (remove-me . handle)
-          ;; collect all subdirectory handles (we also get sub
-          ;; directories of subdirectories)
-          :in (loop :for file-pathname :being :the :hash-keys :of table
-                    :using (hash-value handle)
-                    :when (uiop:subpathp file-pathname pathname)
-                    :collect (cons file-pathname handle))
-          ;; remove them and if there is a handle unwatch it
-          :do (progn
-                (remhash remove-me table)
-                (when handle
-                  (if (eql (bt:current-thread)
-                           (thread watcher))
-                      (as:fs-unwatch handle)
-                      (in-event-loop (watcher)
-                        (as:fs-unwatch handle))))))))
+  (let* ((table (directory-handles watcher)))
+    (flet ((remove-entry (entry)
+             (let ((handle (gethash pathname table)))
+               (remhash entry table)
+               (when handle
+                 (if (eql (bt:current-thread)
+                          (thread watcher))
+                     (as:fs-unwatch handle)
+                     (in-event-loop (watcher)
+                       (as:fs-unwatch handle)))))))
+      (remove-entry pathname)
+      (when remove-subdirectories
+        (map nil #'remove-entry
+             (loop :for file-pathname :being :the :hash-keys :of table
+                   :when (uiop:subpathp file-pathname pathname)
+                   :collect file-pathname))))))
 
 (defun get-handle-path (handle)
   "gets the path (string) of the given cl-async fs-handle, returns a
@@ -516,11 +515,13 @@ sub-directories of pathname and call add-dir for each"
       (labels ((check-if-dir-deleted ()
                  (unless (escaped-directory-exists-p dir)
                    ;; call callback so that it will detect a on-deleted event
-                   (callback watcher
-                             (gethash (dir watcher) (directory-handles watcher))
-                             ""
-                             nil
-                             nil))
+                   (let ((handle (gethash (dir watcher) (directory-handles watcher))))
+                     (when handle
+                       (callback watcher
+                                 handle
+                                 ""
+                                 nil
+                                 nil))))
                  (when alive-p
                    (as:delay #'check-if-dir-deleted
                      :time 1))))
@@ -594,7 +595,7 @@ sub-directories of pathname and call add-dir for each"
     (when alive-p
       ;; unwatch all handles to stop event-loop-thread
       (loop :for path :being :the :hash-key :of directory-handles
-            :do (remove-directory-from-watch watcher path))
+            :do (remove-directory-from-watch watcher path nil))
       (in-event-loop (watcher)
         (as:free-notifier queue-notifier)
         (setf queue-notifier nil))
