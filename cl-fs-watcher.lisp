@@ -197,33 +197,36 @@ and to stop the Watcher and cleanup all its resources use:
   "Got the inspiration for that code from
   sb-impl::unparse-physical-piece, credits go to Xach for finding it.
   Thanks again for the helping me out"
-  (unless escape-char
-    (setf escape-char
-          #-os-windows #\\
-          #+os-windows #\^))
-  (let* ((srclen (length thing))
-         (dstlen srclen))
-    (dotimes (i srclen)
-      (let ((char (char thing i)))
-        (case char
-          ((#\* #\? #\[ #+os-windows #\~)
-           (incf dstlen))
-          (t (when (char= char escape-char)
-               (incf dstlen))))))
-    (let ((result (make-string dstlen))
-          (dst 0))
-      (dotimes (src srclen)
-        (let ((char (char thing src)))
-          (case char
-            ((#\* #\? #\[ #+os-windows #\~)
-             (setf (char result dst) escape-char)
-             (incf dst))
-            (t (when (char= char escape-char)
-                 (setf (char result dst) escape-char)
-                 (incf dst))))
-          (setf (char result dst) char)
-          (incf dst)))
-      result)))
+  (if (not (wild-pathname-p thing))
+      thing
+      (progn
+        (unless escape-char
+          (setf escape-char
+                #-os-windows #\\
+                #+os-windows #\^))
+        (let* ((srclen (length thing))
+               (dstlen srclen))
+          (dotimes (i srclen)
+            (let ((char (char thing i)))
+              (case char
+                ((#\* #\? #\[ #+os-windows #\~)
+                 (incf dstlen))
+                (t (when (char= char escape-char)
+                     (incf dstlen))))))
+          (let ((result (make-string dstlen))
+                (dst 0))
+            (dotimes (src srclen)
+              (let ((char (char thing src)))
+                (case char
+                  ((#\* #\? #\[ #+os-windows #\~)
+                   (setf (char result dst) escape-char)
+                   (incf dst))
+                  (t (when (char= char escape-char)
+                       (setf (char result dst) escape-char)
+                       (incf dst))))
+                (setf (char result dst) char)
+                (incf dst)))
+            result)))))
 
 (defun escaped-directory-exists-p (directory)
   (uiop:directory-exists-p
