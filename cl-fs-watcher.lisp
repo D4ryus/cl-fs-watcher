@@ -553,10 +553,11 @@ sub-directories of pathname and call add-dir for each"
                 (let ((skip nil))
                   (when skip-duplicated
                     (let ((next (lparallel.queue:peek-queue event-queue)))
-                        (destructuring-bind (nil nil n-filename n-event-type)
                       (when (and next
                                  (not (eql next :stop)))
+                        (destructuring-bind (ignored ignored n-filename n-event-type)
                             next
+                          (declare (ignorable ignored))
                           (when (and (equal filename n-filename)
                                      (eql event-type n-event-type))
                             (setf skip t))))))
