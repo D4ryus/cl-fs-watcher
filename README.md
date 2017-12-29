@@ -43,4 +43,4 @@ To start Watching ```~/watch-me/``` for changes run:
 - ```:directory-removed```
 - ```:on-deleted``` (given if the main directory, which is watched by ```WATCHER``` (```:dir``` initarg to make-instance (here ```~/watch-me```)), is deleted. If the ```Hook``` returns (here function ```callback```) the Event Loop will finish and the Watcher ```THREAD``` will terminate)
 
-Use ```(cl-fs-watcher:stop-watcher *my-watcher*)``` to cleanup all handles and terminate the Event-Loop. This wont be necessary if ```:on-deleted``` occurs, because the watcher will terminate himself.
+Use ```(cl-fs-watcher:stop-watcher *my-watcher*)``` to cleanup all handles and terminate the Event-Loop. This wont be necessary if ```:on-deleted``` occurs, because the watcher will terminate itself.
